@@ -14,7 +14,7 @@ endif()
 
 externalproject_add(expat
                     SOURCE_DIR ${CMAKE_SOURCE_DIR}
-                    UPDATE_COMMAND ${CP_AUTOCONF}
+                    PATCH_COMMAND ${CP_AUTOCONF}
                     INSTALL_COMMAND ""
                     BUILD_IN_SOURCE 1
                     CONFIGURE_COMMAND ./configure --prefix=${OUTPUT_DIR} --disable-shared
