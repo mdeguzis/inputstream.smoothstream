@@ -118,7 +118,7 @@ class DummyDecrypter : public AP4_CencSingleSampleDecrypter
 {
 public:
   DummyDecrypter() :AP4_CencSingleSampleDecrypter(0) {};
-  
+
   virtual AP4_Result DecryptSampleData(AP4_DataBuffer& data_in,
     AP4_DataBuffer& data_out,
 
@@ -132,7 +132,7 @@ public:
     const AP4_UI16* bytes_of_cleartext_data,
 
     // array of <subsample_count> integers. NULL if subsample_count is 0
-    const AP4_UI32* bytes_of_encrypted_data) override 
+    const AP4_UI32* bytes_of_encrypted_data) override
   {
     return AP4_SUCCESS;
   };
@@ -205,8 +205,6 @@ bool KodiDASHTree::download(const char* url)
   size_t nbRead;
   while ((nbRead = xbmc->ReadFile(file, buf, CHUNKSIZE)) > 0 && ~nbRead && write_data(buf, nbRead));
 
-  download_speed_ = xbmc->GetFileDownloadSpeed(file);
-
   xbmc->CloseFile(file);
 
   xbmc->Log(ADDON::LOG_DEBUG, "Download %s finished", url);
@@ -225,15 +223,24 @@ bool KodiDASHStream::download(const char* url)
 
   // read the file
   char *buf = (char*)malloc(1024*1024);
-  size_t nbRead;
-  while ((nbRead = xbmc->ReadFile(file, buf, 1024 * 1024)) > 0 && ~nbRead && write_data(buf, nbRead));
+  size_t nbRead, nbReadOverall = 0;;
+  while ((nbRead = xbmc->ReadFile(file, buf, 1024 * 1024)) > 0 && ~nbRead && write_data(buf, nbRead)) nbReadOverall += nbRead;
   free(buf);
 
-  download_speed_ = xbmc->GetFileDownloadSpeed(file);
+  double current_download_speed_ = xbmc->GetFileDownloadSpeed(file);
+  //Calculate the new downloadspeed to 1MB
+  static const size_t ref_packet = 1024 * 1024;
+  if (nbReadOverall >= ref_packet)
+    set_download_speed(current_download_speed_);
+  else
+  {
+    double ratio = (double)nbReadOverall / ref_packet;
+    set_download_speed((get_download_speed() * (1.0 - ratio)) + current_download_speed_*ratio);
+  }
 
   xbmc->CloseFile(file);
 
-  xbmc->Log(ADDON::LOG_DEBUG, "Download %s finished", url);
+  xbmc->Log(ADDON::LOG_DEBUG, "Download %s finished, average download speed: %0.4lf", url, get_download_speed());
 
   return nbRead == 0;
 }
@@ -405,12 +412,13 @@ void Session::STREAM::disable()
   }
 }
 
-Session::Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData)
+Session::Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData, const char* profile_path)
   :single_sample_decryptor_(0)
   , mpdFileURL_(strURL)
   , license_type_(strLicType)
   , license_key_(strLicKey)
   , license_data_(strLicData)
+  , profile_path_(profile_path)
   , width_(1280)
   , height_(720)
   , last_pts_(0)
@@ -418,9 +426,37 @@ Session::Session(const char *strURL, const char *strLicType, const char* strLicK
   , decrypter_(0)
   , changed_(false)
 {
+  std::string fn(profile_path_ + "bandwidth.bin");
+  FILE* f = fopen(fn.c_str(), "rb");
+  if (f)
+  {
+    double val;
+    fread(&val, sizeof(double), 1, f);
+    dashtree_.bandwidth_ = static_cast<uint64_t>(val * 8);
+    fclose(f);
+  }
+  else
+    dashtree_.bandwidth_ = 4000000;
+
   int buf;
-  xbmc->GetSetting("LASTBANDWIDTH", (char*)&buf);
-  dashtree_.bandwidth_ = buf;
+  xbmc->GetSetting("MAXRESOLUTION", (char*)&buf);
+  switch (buf)
+  {
+  case 0:
+    maxwidth_ = 0xFFFF;
+    maxheight_ = 0xFFFF;
+    break;
+  case 2:
+    maxwidth_ = 1920;
+    maxheight_ = 1080;
+    break;
+  default:
+    maxwidth_ = 1280;
+    maxheight_ = 720;
+  }
+
+  //xbmc->GetSetting("STREAMSELECTION", (char*)&buf);
+  //manual_streams_ = buf != 0;
 }
 
 Session::~Session()
@@ -434,6 +470,15 @@ Session::~Session()
     dlclose(decrypterModule_);
     decrypterModule_ = 0;
     decrypter_ = 0;
+  }
+
+  std::string fn(profile_path_ + "bandwidth.bin");
+  FILE* f = fopen(fn.c_str(), "wb");
+  if (f)
+  {
+    double val(dashtree_.get_average_download_speed());
+    fwrite((const char*)&val, sizeof(double), 1, f);
+    fclose(f);
   }
 }
 
@@ -600,16 +645,16 @@ bool Session::initialize()
   }
 
   // Try to initialize an SingleSampleDecryptor
-#if 1  
+#if 1
   if (dashtree_.encryptionState_)
   {
     if (dashtree_.protection_key_.size()!=16 || license_data_.empty())
       return false;
-    
+
     uint8_t ld[1024];
     unsigned int ld_size(1024);
     b64_decode(license_data_.c_str(), license_data_.size(), ld, ld_size);
-    
+
     const uint8_t *uuid((uint8_t*)strstr((const char*)ld, "{UUID}"));
     unsigned int license_size = uuid ? ld_size + 36 -6: ld_size;
 
@@ -679,7 +724,7 @@ bool Session::initialize()
   }
 #else
   return (single_sample_decryptor_ = new DummyDecrypter()) != 0;
-  
+
   //dashtree_.encryptionState_ = 0;
 #endif
   return true;
@@ -860,7 +905,7 @@ extern "C" {
 
     kodihost.SetAddonPath(props.m_profileFolder);
 
-    session = new Session(props.m_strURL, lt, lk, ld);
+    session = new Session(props.m_strURL, lt, lk, ld, props.m_profileFolder);
 
     if (!session->initialize())
     {
@@ -878,28 +923,7 @@ extern "C" {
 
   const char* GetPathList(void)
   {
-    static std::string strSettings;
-    strSettings.clear();
-
-    char buffer[1024];
-
-    unsigned int nURL(0);
-    while (1)
-    {
-      sprintf(buffer, "URL%d", ++nURL);
-      if (xbmc->GetSetting(buffer, buffer))
-      {
-        if (buffer[0])
-        {
-          if (!strSettings.empty())
-            strSettings += "|";
-          strSettings += buffer;
-        }
-      }
-      else
-        break;
-    }
-    return strSettings.c_str();
+    return "";
   }
 
   struct INPUTSTREAM_IDS GetStreamIds()
@@ -974,7 +998,7 @@ extern "C" {
       stream->stream_.select_stream(true);
 
       stream->input_ = new AP4_DASHStream(&stream->stream_);
- 
+
       AP4_Movie* movie = NULL;
       static const AP4_Track::Type TIDC[dash::DASHTree::STREAM_TYPE_COUNT] =
       { AP4_Track::TYPE_UNKNOWN, AP4_Track::TYPE_VIDEO, AP4_Track::TYPE_AUDIO, AP4_Track::TYPE_TEXT };
@@ -1122,7 +1146,9 @@ extern "C" {
   //callback - will be called from kodi
   void SetVideoResolution(int width, int height)
   {
-
+    xbmc->Log(ADDON::LOG_INFO, "SetVideoResolution (%d x %d)", width, height);
+    if (session)
+      session->SetVideoResolution(width, height);
   }
 
   int GetTotalTime()

@@ -76,7 +76,7 @@ public:
 class Session: public FragmentObserver
 {
 public:
-  Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData);
+  Session(const char *strURL, const char *strLicType, const char* strLicKey, const char* strLicData, const char* profile_path);
   ~Session();
   bool initialize();
   FragmentedSampleReader *GetNextSample();
@@ -102,6 +102,7 @@ public:
   double GetTotalTime()const { return dashtree_.overallSeconds_; };
   double GetPTS()const { return last_pts_; };
   bool CheckChange(bool bSet = false){ bool ret = changed_; changed_ = bSet; return ret; };
+  void SetVideoResolution(unsigned int w, unsigned int h) { width_ = w < maxwidth_ ? w : maxwidth_; height_ = h < maxheight_ ? h : maxheight_; };
   bool SeekTime(double seekTime, unsigned int streamId = 0, bool preceeding=true);
   bool IsEncrypted()const { return dashtree_.encryptionState_ != 0; };
   bool IsLive()const { return dashtree_.isLive_; };
@@ -117,6 +118,7 @@ protected:
 private:
   std::string mpdFileURL_;
   std::string license_key_, license_type_, license_data_;
+  std::string profile_path_;
   void * decrypterModule_;
   SSD_DECRYPTER *decrypter_;
 
@@ -125,6 +127,7 @@ private:
   std::vector<STREAM*> streams_;
 
   uint16_t width_, height_;
+  uint16_t maxwidth_, maxheight_;
   uint32_t fixed_bandwidth_;
   bool changed_;
   double last_pts_;
