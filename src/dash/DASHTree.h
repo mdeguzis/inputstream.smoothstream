@@ -176,7 +176,7 @@ namespace dash
     unsigned int  encryptionState_;
     std::string protection_key_;
     uint8_t adpChannelCount_;
-    
+
     enum
     {
       SSMNODE_SSM = 1 << 0,

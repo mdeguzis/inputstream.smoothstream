@@ -32,6 +32,7 @@
 #define SAFE_DELETE(p)       do { delete (p);     (p)=NULL; } while (0)
 
 ADDON::CHelper_libXBMC_addon *xbmc = 0;
+std::uint16_t kodiDisplayWidth(0), kodiDisplayHeight(0);
 
 /*******************************************************
 kodi host - interface for decrypter libraries
@@ -419,8 +420,8 @@ Session::Session(const char *strURL, const char *strLicType, const char* strLicK
   , license_key_(strLicKey)
   , license_data_(strLicData)
   , profile_path_(profile_path)
-  , width_(1280)
-  , height_(720)
+  , width_(kodiDisplayWidth)
+  , height_(kodiDisplayHeight)
   , last_pts_(0)
   , decrypterModule_(0)
   , decrypter_(0)
@@ -454,7 +455,11 @@ Session::Session(const char *strURL, const char *strLicType, const char* strLicK
     maxwidth_ = 1280;
     maxheight_ = 720;
   }
+  if (width_ > maxwidth_)
+    width_ = maxwidth_;
 
+  if (height_ > maxheight_)
+    height_ = maxheight_;
   //xbmc->GetSetting("STREAMSELECTION", (char*)&buf);
   //manual_streams_ = buf != 0;
 }
@@ -595,12 +600,6 @@ bool Session::initialize()
     STREAM &stream(*streams_.back());
     stream.stream_.prepare_stream(adp, width_, height_, min_bandwidth, max_bandwidth);
 
-    const dash::DASHTree::Representation *rep(stream.stream_.getRepresentation());
-
-    stream.info_.m_Width = rep->width_;
-    stream.info_.m_Height = rep->height_;
-    stream.info_.m_Aspect = rep->aspect_;
-    stream.info_.m_pID = i;
     switch (adp->type_)
     {
     case dash::DASHTree::VIDEO:
@@ -615,33 +614,11 @@ bool Session::initialize()
     default:
       break;
     }
-
-    // we currently use only the first track!
-    std::string::size_type pos = rep->codecs_.find(",");
-    if (pos == std::string::npos)
-      pos = rep->codecs_.size();
-
-    strncpy(stream.info_.m_codecInternalName, rep->codecs_.c_str(), pos);
-    stream.info_.m_codecInternalName[pos] = 0;
-
-    if (rep->codecs_.find("AAC") == 0)
-      strcpy(stream.info_.m_codecName, "aac");
-    else if (rep->codecs_.find("ec-3") == 0 || rep->codecs_.find("ac-3") == 0)
-      strcpy(stream.info_.m_codecName, "eac3");
-    else if (rep->codecs_.find("AVC") == 0
-    || rep->codecs_.find("H264") == 0)
-      strcpy(stream.info_.m_codecName, "h264");
-    else if (rep->codecs_.find("hevc") == 0)
-      strcpy(stream.info_.m_codecName, "hevc");
-
-    stream.info_.m_FpsRate = rep->fpsRate_;
-    stream.info_.m_FpsScale = rep->fpsScale_;
-    stream.info_.m_SampleRate = rep->samplingRate_;
-    stream.info_.m_Channels = rep->channelCount_;
-    stream.info_.m_Bandwidth = rep->bandwidth_;
+    stream.info_.m_pID = i;
     strcpy(stream.info_.m_language, adp->language_.c_str());
-    stream.info_.m_ExtraData = reinterpret_cast<const uint8_t*>(rep->codec_extra_data_.data());
-    stream.info_.m_ExtraSize = rep->codec_extra_data_.size();
+
+    UpdateStream(stream);
+
   }
 
   // Try to initialize an SingleSampleDecryptor
@@ -730,6 +707,43 @@ bool Session::initialize()
   return true;
 }
 
+void Session::UpdateStream(STREAM &stream)
+{
+  const dash::DASHTree::Representation *rep(stream.stream_.getRepresentation());
+
+  stream.info_.m_Width = rep->width_;
+  stream.info_.m_Height = rep->height_;
+  stream.info_.m_Aspect = rep->aspect_;
+
+  // we currently use only the first track!
+  std::string::size_type pos = rep->codecs_.find(",");
+  if (pos == std::string::npos)
+    pos = rep->codecs_.size();
+
+  strncpy(stream.info_.m_codecInternalName, rep->codecs_.c_str(), pos);
+  stream.info_.m_codecInternalName[pos] = 0;
+
+  if (rep->codecs_.find("AAC") == 0)
+    strcpy(stream.info_.m_codecName, "aac");
+  else if (rep->codecs_.find("ec-3") == 0 || rep->codecs_.find("ac-3") == 0)
+    strcpy(stream.info_.m_codecName, "eac3");
+  else if (rep->codecs_.find("AVC") == 0
+    || rep->codecs_.find("H264") == 0)
+    strcpy(stream.info_.m_codecName, "h264");
+  else if (rep->codecs_.find("hevc") == 0)
+    strcpy(stream.info_.m_codecName, "hevc");
+
+  stream.info_.m_FpsRate = rep->fpsRate_;
+  stream.info_.m_FpsScale = rep->fpsScale_;
+  stream.info_.m_SampleRate = rep->samplingRate_;
+  stream.info_.m_Channels = rep->channelCount_;
+  stream.info_.m_Bandwidth = rep->bandwidth_;
+
+  stream.info_.m_ExtraData = reinterpret_cast<const uint8_t*>(rep->codec_extra_data_.data());
+  stream.info_.m_ExtraSize = rep->codec_extra_data_.size();
+}
+
+
 FragmentedSampleReader *Session::GetNextSample()
 {
   STREAM *res(0);
@@ -803,6 +817,8 @@ extern "C" {
   {
     // initialize globals
     session = nullptr;
+    kodiDisplayWidth = 1280;
+    kodiDisplayHeight = 720;
 
     if (!hdl)
       return ADDON_STATUS_UNKNOWN;
@@ -995,7 +1011,13 @@ extern "C" {
       stream->enabled = true;
 
       stream->stream_.start_stream(0);
-      stream->stream_.select_stream(true);
+      const dash::DASHTree::Representation *rep(stream->stream_.getRepresentation());
+      stream->stream_.select_stream(true, false/*, stream->info_.m_pID >> 16*/);
+      if (rep != stream->stream_.getRepresentation())
+      {
+        session->UpdateStream(*stream);
+        session->CheckChange(true);
+      }
 
       stream->input_ = new AP4_DASHStream(&stream->stream_);
 
@@ -1149,6 +1171,11 @@ extern "C" {
     xbmc->Log(ADDON::LOG_INFO, "SetVideoResolution (%d x %d)", width, height);
     if (session)
       session->SetVideoResolution(width, height);
+    else
+    {
+      kodiDisplayWidth = width;
+      kodiDisplayHeight = height;
+    }
   }
 
   int GetTotalTime()

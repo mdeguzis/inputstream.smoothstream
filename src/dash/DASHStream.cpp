@@ -36,7 +36,7 @@ bool DASHStream::download_segment()
   char rangebuf[128];
   if (!current_seg_ || !~current_seg_->range_end_)
     return false;
-  
+
   std::string strURL(current_rep_->url_);
   sprintf(rangebuf, "%" PRIu64, tree_.minLiveTime_ + current_seg_->range_end_);
   strURL.replace(strURL.find("{start time}"), 12, rangebuf);
@@ -133,14 +133,14 @@ bool DASHStream::seek_time(double seek_seconds, double current_seconds, bool &ne
     return false;
 
   uint32_t choosen_seg(~0);
-  
+
   if (!current_adp_->segment_durations_.data.empty())
   {
     uint64_t sec_in_ts = static_cast<uint64_t>(seek_seconds * current_adp_->timescale_);
     choosen_seg = 0;
     while (choosen_seg < current_adp_->segment_durations_.data.size() && sec_in_ts > *current_adp_->segment_durations_[choosen_seg])
       sec_in_ts -= *current_adp_->segment_durations_[choosen_seg++];
-  } 
+  }
   else if (current_rep_->duration_ > 0 && current_rep_->timescale_ > 0)
   {
     uint64_t sec_in_ts = static_cast<uint64_t>(seek_seconds * current_rep_->timescale_);
@@ -173,11 +173,16 @@ bool DASHStream::select_stream(bool force, bool justInit)
   if (force && absolute_position_ == 0) //already selected
     return true;
 
+  unsigned int bestDist(~0);
   for (std::vector<DASHTree::Representation*>::const_iterator br(current_adp_->repesentations_.begin()), er(current_adp_->repesentations_.end()); br != er; ++br)
   {
-    if ((*br)->width_ <= width_ && (*br)->height_ <= height_ && (*br)->bandwidth_ <= bandwidth_
-    && (!new_rep || ((*br)->bandwidth_ > new_rep->bandwidth_)))
+    unsigned int dist;
+    if ((dist = abs((*br)->width_ * (*br)->height_ - width_ * height_)) < bestDist && (*br)->bandwidth_ <= bandwidth_
+      && (!new_rep || ((*br)->bandwidth_ > new_rep->bandwidth_)))
+    {
+      bestDist = dist;
       new_rep = (*br);
+    }
     else if (!min_rep || (*br)->bandwidth_ < min_rep->bandwidth_)
       min_rep = (*br);
   }

@@ -96,6 +96,8 @@ public:
     FragmentedSampleReader *reader_;
   };
 
+  void UpdateStream(STREAM &stream);
+
   STREAM *GetStream(unsigned int sid) const { return sid - 1 < streams_.size() ? streams_[sid - 1] : 0; };
   unsigned int GetStreamCount() const { return streams_.size(); };
   AP4_CencSingleSampleDecrypter * GetSingleSampleDecryptor()const{ return single_sample_decryptor_; };
