@@ -173,19 +173,22 @@ bool DASHStream::select_stream(bool force, bool justInit)
   if (force && absolute_position_ == 0) //already selected
     return true;
 
-  unsigned int bestDist(~0);
+  unsigned int bestScore(~0);
+
   for (std::vector<DASHTree::Representation*>::const_iterator br(current_adp_->repesentations_.begin()), er(current_adp_->repesentations_.end()); br != er; ++br)
   {
-    unsigned int dist;
-    if ((dist = abs((*br)->width_ * (*br)->height_ - width_ * height_)) < bestDist && (*br)->bandwidth_ <= bandwidth_
-      && (!new_rep || ((*br)->bandwidth_ > new_rep->bandwidth_)))
+    unsigned int score;
+    if ((*br)->bandwidth_ <= bandwidth_
+      && ((score = abs(static_cast<int>((*br)->width_ * (*br)->height_) - static_cast<int>(width_ * height_))
+        + static_cast<unsigned int>(sqrt(bandwidth_ - (*br)->bandwidth_))) < bestScore))
     {
-      bestDist = dist;
+      bestScore = score;
       new_rep = (*br);
     }
     else if (!min_rep || (*br)->bandwidth_ < min_rep->bandwidth_)
       min_rep = (*br);
   }
+
   if (!new_rep)
     new_rep = min_rep;
 
