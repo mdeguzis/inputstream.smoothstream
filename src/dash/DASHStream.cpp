@@ -95,7 +95,10 @@ uint32_t DASHStream::read(void* buffer, uint32_t  bytesToRead)
   {
     current_seg_ = current_rep_->get_next_segment(current_seg_);
     if (!download_segment() || segment_buffer_.empty())
+    {
+      stopped_ = true;
       return 0;
+    }
   }
   if (bytesToRead)
   {
