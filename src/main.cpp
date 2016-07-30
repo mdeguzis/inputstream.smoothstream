@@ -260,6 +260,7 @@ public:
     , m_dts(0.0)
     , m_pts(0.0)
     , m_eos(false)
+    , m_started(false)
     , m_StreamId(streamId)
     , m_SingleSampleDecryptor(ssd)
     , m_Decrypter(0)
@@ -275,6 +276,14 @@ public:
   ~FragmentedSampleReader()
   {
     delete m_Decrypter;
+  }
+
+  AP4_Result Start()
+  {
+    if (m_started)
+      return AP4_SUCCESS;
+    m_started = true;
+    return ReadSample();
   }
 
   AP4_Result ReadSample()
@@ -335,6 +344,7 @@ public:
     {
       if (m_Decrypter)
         m_Decrypter->SetSampleIndex(sampleIndex);
+      m_started = true;
       return AP4_SUCCEEDED(ReadSample());
     }
     return false;
@@ -384,7 +394,7 @@ protected:
 private:
   AP4_Track *m_Track;
   AP4_UI32 m_StreamId;
-  bool m_eos;
+  bool m_eos, m_started;
   double m_dts, m_pts;
 
   AP4_Sample     m_sample_;
@@ -752,7 +762,7 @@ FragmentedSampleReader *Session::GetNextSample()
     && (!res || (*b)->reader_->DTS() < res->reader_->DTS()))
         res = *b;
 
-  if (res)
+  if (res && AP4_SUCCEEDED(res->reader_->Start()))
   {
     last_pts_ = res->reader_->PTS();
     return res->reader_;
@@ -966,7 +976,6 @@ extern "C" {
     caps.m_supportsIDisplayTime = true;
     caps.m_supportsSeek = true;
     caps.m_supportsPause = true;
-    caps.m_supportsEnableAtPTS = true;
     return caps;
   }
 
@@ -988,12 +997,7 @@ extern "C" {
 
   void EnableStream(int streamid, bool enable)
   {
-    return EnableStreamAtPTS(streamid, enable ? 0 : ~0 );
-  }
-
-  void EnableStreamAtPTS(int streamid, uint64_t pts)
-  {
-    xbmc->Log(ADDON::LOG_DEBUG, "EnableStreamAtPTS(%d, %" PRIi64, streamid, pts);
+    xbmc->Log(ADDON::LOG_DEBUG, "EnableStream (%d -> %s)", streamid, enable?"true":"false");
 
     if (!session)
       return;
@@ -1003,7 +1007,7 @@ extern "C" {
     if (!stream)
       return;
 
-    if (~pts)
+    if (enable)
     {
       if (stream->enabled)
         return;
@@ -1071,13 +1075,6 @@ extern "C" {
 
       stream->reader_->SetObserver(dynamic_cast<FragmentObserver*>(session));
 
-      // Set the session Changed to force new GetStreamInfo call from kodi -> addon
-      // session->CheckChange(true);
-
-      if ((pts > 0.2f && !session->SeekTime(static_cast<double>(pts)*0.000001f, streamid))
-      ||(pts <= 0.2f && !AP4_SUCCEEDED(stream->reader_->ReadSample())))
-        return stream->disable();
-
       return;
     }
     return stream->disable();
@@ -1120,6 +1117,8 @@ extern "C" {
     if (!session)
       return NULL;
 
+    FragmentedSampleReader *sr(session->GetNextSample());
+
     if (session->CheckChange())
     {
       DemuxPacket *p = ipsh->AllocateDemuxPacket(0);
@@ -1127,8 +1126,6 @@ extern "C" {
       xbmc->Log(ADDON::LOG_DEBUG, "DMX_SPECIALID_STREAMCHANGE");
       return p;
     }
-
-    FragmentedSampleReader *sr(session->GetNextSample());
 
     if (sr)
     {

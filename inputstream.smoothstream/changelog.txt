@@ -1,3 +1,5 @@
+1.2.1
+- Remove EnableStreamAtPTS callback as it has gone in kodi implementation
 1.2.0
 - Adapt changes of the new ssd version 3 interface (pls note that ssd interface verion MUST be 3 now)
 1.1.3
