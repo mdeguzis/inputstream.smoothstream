@@ -584,13 +584,16 @@ bool Session::initialize()
   }
 
   // Open mpd file
-  const char* delim(strrchr(mpdFileURL_.c_str(), '/'));
-  if (!delim)
+  size_t paramPos = mpdFileURL_.find('?');
+  dashtree_.base_url_ = (paramPos == std::string::npos)? mpdFileURL_:mpdFileURL_.substr(0, paramPos);
+
+  paramPos = dashtree_.base_url_.find_last_of('/', dashtree_.base_url_.length());
+  if (paramPos == std::string::npos)
   {
     xbmc->Log(ADDON::LOG_ERROR, "Invalid mpdURL: / expected (%s)", mpdFileURL_.c_str());
     return false;
   }
-  dashtree_.base_url_ = std::string(mpdFileURL_.c_str(), (delim - mpdFileURL_.c_str()) + 1);
+  dashtree_.base_url_.resize(paramPos + 1);
 
   if (!dashtree_.open(mpdFileURL_.c_str()) || dashtree_.empty())
   {
